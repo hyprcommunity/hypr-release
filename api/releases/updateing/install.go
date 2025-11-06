@@ -114,60 +114,86 @@ func runInstallerScript(repoPath string) error {
 // ------------------------------------------------------------
 // README analizli kurulum
 func installFromReadme(readmePath, repoPath string) error {
-	content, err := os.ReadFile(readmePath)
-	if err != nil {
-		return err
-	}
+    // 🔧 README içeriğini oku
+    content, err := os.ReadFile(readmePath)
+    if err != nil {
+        return err
+    }
 
-	modelPath := filepath.Join(SystemModelDir, "mistral-7b.Q4_K_M.gguf")
-	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
-		fmt.Println("⚠️ LLM model not found, fallback to regex parser.")
-		return parseReadmeRegex(string(content))
-	}
+    // 🔍 Model dizininden .gguf dosyasını bul
+    files, err := os.ReadDir(SystemModelDir)
+    if err != nil {
+        fmt.Println("⚠️ cannot read model directory:", err)
+        fmt.Println("fallback to regex parser.")
+        return parseReadmeRegex(string(content))
+    }
 
-	fmt.Println("[hyprrelease] loading AI model:", modelPath)
-	model := llm.LoadModel(modelPath)
+    var modelPath string
+    for _, f := range files {
+        if strings.HasSuffix(f.Name(), ".gguf") {
+            modelPath = filepath.Join(SystemModelDir, f.Name())
+            break
+        }
+    }
 
-	prompt := `
+    // 🔄 Model bulunamadıysa regex parser’a geç
+    if modelPath == "" {
+        fmt.Println("⚠️ no LLM model found, fallback to regex parser.")
+        return parseReadmeRegex(string(content))
+    }
+
+    fmt.Printf("[hyprrelease] loading AI model: %s\n", filepath.Base(modelPath))
+    model := llm.LoadModel(modelPath)
+
+    // 🧠 README analizi prompt'u
+    prompt := `
 You are an installation step extractor.
-Read the following README and output ONLY the shell commands to install the project.
-Use one command per line, no explanations.
+Analyze the following README and output ONLY the shell commands to install the project.
+List each command on its own line. No explanations, no comments.
 ---
 ` + string(content)
 
-	raw := model.Predict(prompt)
-	cmds := strings.Split(strings.TrimSpace(raw), "\n")
+    raw := model.Predict(prompt)
+    cmds := strings.Split(strings.TrimSpace(raw), "\n")
 
-	if len(cmds) == 0 {
-		fmt.Println("[hyprrelease] AI found no commands, fallback to regex parser.")
-		return parseReadmeRegex(string(content))
-	}
+    if len(cmds) == 0 {
+        fmt.Println("[hyprrelease] AI found no commands, fallback to regex parser.")
+        return parseReadmeRegex(string(content))
+    }
 
-	fmt.Println("[AI extracted install steps]:")
-	for i, c := range cmds {
-		fmt.Printf("%d. %s\n", i+1, c)
-	}
+    fmt.Println("[AI extracted install steps]:")
+    for i, c := range cmds {
+        fmt.Printf("%d. %s\n", i+1, c)
+    }
 
-	fmt.Print("Proceed with installation? [Y/n]: ")
-	var resp string
-	fmt.Scanln(&resp)
-	if strings.ToLower(resp) != "y" && resp != "" {
-		return fmt.Errorf("installation aborted by user")
-	}
+    // ☑️ Kullanıcı onayı
+    fmt.Print("Proceed with installation? [Y/n]: ")
+    var resp string
+    fmt.Scanln(&resp)
+    if strings.ToLower(resp) != "y" && resp != "" {
+        return fmt.Errorf("installation aborted by user")
+    }
 
-	for _, c := range cmds {
-		c = strings.TrimSpace(c)
-		if c == "" {
-			continue
-		}
-		if strings.Contains(c, "sudo") || strings.Contains(c, "rm ") {
-			fmt.Printf("⚠️ skipped dangerous command: %s\n", c)
-			continue
-		}
-		runCmd(c)
-	}
+    for _, c := range cmds {
+        c = strings.TrimSpace(c)
+        if c == "" {
+            continue
+        }
 
-	return nil
+        lower := strings.ToLower(c)
+        if strings.Contains(lower, "sudo ") ||
+            strings.Contains(lower, "rm ") ||
+            strings.Contains(lower, ":(){ :|:& };:") || // fork bomb koruması
+            strings.Contains(lower, "mkfs") || // disk format
+            strings.Contains(lower, "dd if=") { // disk overwrite
+            fmt.Printf("⚠️ skipped dangerous command: %s\n", c)
+            continue
+        }
+
+        runCmd(c)
+    }
+
+    return nil
 }
 
 // Regex fallback
@@ -187,70 +213,99 @@ func parseReadmeRegex(content string) error {
 // ------------------------------------------------------------
 // AI tabanlı güvenli dosya seçimi
 func aiSafeFileInstall(repoPath string) error {
-	modelPath := filepath.Join(SystemModelDir, "mistral-7b.Q4_K_M.gguf")
-	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
-		return fmt.Errorf("no AI model found")
-	}
+    // 🔍 LLM model dizini tanımlanıyor
+    files, err := os.ReadDir(SystemModelDir)
+    if err != nil {
+        return fmt.Errorf("failed to read model directory: %v", err)
+    }
 
-	fmt.Println("[hyprrelease] AI-based safe file analysis")
-	model := llm.LoadModel(modelPath)
+    // 🧩 İlk .gguf dosyasını bul
+    var modelPath string
+    for _, f := range files {
+        if strings.HasSuffix(f.Name(), ".gguf") {
+            modelPath = filepath.Join(SystemModelDir, f.Name())
+            break
+        }
+    }
 
-	var structure []string
-	filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
-		if err == nil {
-			rel, _ := filepath.Rel(repoPath, path)
-			if rel != "." {
-				structure = append(structure, rel)
-			}
-		}
-		return nil
-	})
+    if modelPath == "" {
+        return fmt.Errorf("no .gguf model found in %s", SystemModelDir)
+    }
 
-	prompt := `
+    fmt.Printf("[hyprrelease] AI-based safe file analysis using model: %s\n", filepath.Base(modelPath))
+
+    model := llm.LoadModel(modelPath)
+
+    // 🔧 Dosya ağacını çıkar
+    var structure []string
+    filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
+        if err == nil {
+            rel, _ := filepath.Rel(repoPath, path)
+            if rel != "." {
+                structure = append(structure, rel)
+            }
+        }
+        return nil
+    })
+
+    // 🧠 Prompt (optimize edilmiş)
+    prompt := `
 You are a configuration installer AI.
-Analyze the following file tree and select ONLY safe configuration files and scripts to copy into ~/.config/hypr/.
-Ignore LICENSE, README, binaries, caches, wallpapers.
-Return one relative path per line, no explanations.
+From this file tree, select ONLY configuration and script files safe to copy into ~/.config/hypr/.
+Prefer .conf, .ini, .json, .lua, .sh, .desktop files.
+Ignore LICENSE, README, cache, images, fonts, binaries.
+Return one relative path per line, with no explanations.
 ---
 ` + strings.Join(structure, "\n")
 
-	raw := model.Predict(prompt)
-	files := strings.Split(strings.TrimSpace(raw), "\n")
+    raw := model.Predict(prompt)
+    filesList := strings.Split(strings.TrimSpace(raw), "\n")
 
-	if len(files) == 0 {
-		return fmt.Errorf("AI returned no file list")
-	}
+    if len(filesList) == 0 {
+        return fmt.Errorf("AI returned no file list")
+    }
 
-	fmt.Println("[AI selected safe files]:")
-	for _, f := range files {
-		fmt.Println(" →", f)
-	}
+    fmt.Println("[AI selected safe files]:")
+    for _, f := range filesList {
+        fmt.Println(" →", f)
+    }
 
-	fmt.Print("Proceed with AI-selected file copy? [Y/n]: ")
-	var resp string
-	fmt.Scanln(&resp)
-	if strings.ToLower(resp) != "y" && resp != "" {
-		return fmt.Errorf("user aborted")
-	}
+    fmt.Print("Proceed with AI-selected file copy? [Y/n]: ")
+    var resp string
+    fmt.Scanln(&resp)
+    if strings.ToLower(resp) != "y" && resp != "" {
+        return fmt.Errorf("user aborted")
+    }
 
-	home, _ := os.UserHomeDir()
-	target := filepath.Join(home, ".config", "hypr")
+    home, _ := os.UserHomeDir()
+    target := filepath.Join(home, ".config", "hypr")
 
-	for _, rel := range files {
-		src := filepath.Join(repoPath, rel)
-		dest := filepath.Join(target, rel)
-		if _, err := os.Stat(src); err != nil {
-			continue
-		}
-		os.MkdirAll(filepath.Dir(dest), 0755)
-		s, _ := os.Open(src)
-		defer s.Close()
-		d, _ := os.Create(dest)
-		io.Copy(d, s)
-		d.Close()
-		fmt.Println("→ copied:", rel)
-	}
-	return nil
+    for _, rel := range filesList {
+        src := filepath.Join(repoPath, rel)
+        dest := filepath.Join(target, rel)
+        if _, err := os.Stat(src); err != nil {
+            continue
+        }
+
+        os.MkdirAll(filepath.Dir(dest), 0755)
+
+        s, err := os.Open(src)
+        if err != nil {
+            continue
+        }
+        defer s.Close()
+
+        d, err := os.Create(dest)
+        if err != nil {
+            continue
+        }
+        io.Copy(d, s)
+        d.Close()
+
+        fmt.Println("→ copied:", rel)
+    }
+
+    return nil
 }
 
 // ------------------------------------------------------------
