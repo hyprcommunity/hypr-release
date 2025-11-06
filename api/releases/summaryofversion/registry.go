@@ -1,4 +1,4 @@
-package dotfiles
+package summaryofversion
 
 type Dotfile struct {
 	Name         string

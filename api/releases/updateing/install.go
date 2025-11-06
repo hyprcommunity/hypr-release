@@ -1,4 +1,4 @@
-package backend
+package updateing
 
 import (
 	"fmt"
@@ -8,9 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/nomic-ai/go-tiny-llm"
-	"hyprrelease/summaryofversion"
+        "github.com/hyprcommunity/hypr-release/api/releases/summaryofversion" 
 )
 
 const SystemModelDir = "/usr/share/hypr-release/ai/LLM/"
@@ -117,20 +115,20 @@ func installFromReadme(readmePath, repoPath string) error {
     // 🔧 README içeriğini oku
     content, err := os.ReadFile(readmePath)
     if err != nil {
-        return err
+        return fmt.Errorf("failed to read README: %w", err)
     }
 
     // 🔍 Model dizininden .gguf dosyasını bul
     files, err := os.ReadDir(SystemModelDir)
     if err != nil {
-        fmt.Println("⚠️ cannot read model directory:", err)
-        fmt.Println("fallback to regex parser.")
+        fmt.Printf("⚠️ cannot read model directory: %v\n", err)
+        fmt.Println("↪ fallback to regex parser.")
         return parseReadmeRegex(string(content))
     }
 
     var modelPath string
     for _, f := range files {
-        if strings.HasSuffix(f.Name(), ".gguf") {
+        if !f.IsDir() && strings.HasSuffix(f.Name(), ".gguf") {
             modelPath = filepath.Join(SystemModelDir, f.Name())
             break
         }
@@ -142,10 +140,9 @@ func installFromReadme(readmePath, repoPath string) error {
         return parseReadmeRegex(string(content))
     }
 
-    fmt.Printf("[hyprrelease] loading AI model: %s\n", filepath.Base(modelPath))
-    model := llm.LoadModel(modelPath)
+    fmt.Printf("[hyprrelease] using Wingman with model: %s\n", filepath.Base(modelPath))
 
-    // 🧠 README analizi prompt'u
+    // 🧠 Wingman prompt
     prompt := `
 You are an installation step extractor.
 Analyze the following README and output ONLY the shell commands to install the project.
@@ -153,27 +150,39 @@ List each command on its own line. No explanations, no comments.
 ---
 ` + string(content)
 
-    raw := model.Predict(prompt)
-    cmds := strings.Split(strings.TrimSpace(raw), "\n")
-
-    if len(cmds) == 0 {
-        fmt.Println("[hyprrelease] AI found no commands, fallback to regex parser.")
+    // 🚀 Wingman CLI çağrısı
+    cmd := exec.Command("wingman", "ask", prompt)
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        fmt.Printf("⚠️ Wingman failed: %v\nOutput: %s\n", err, string(output))
+        fmt.Println("↪ fallback to regex parser.")
         return parseReadmeRegex(string(content))
     }
 
+    raw := strings.TrimSpace(string(output))
+    cmds := strings.Split(raw, "\n")
+
+    if len(cmds) == 0 || raw == "" {
+        fmt.Println("[hyprrelease] AI found no install commands, fallback to regex parser.")
+        return parseReadmeRegex(string(content))
+    }
+
+    // 📋 Komutları yazdır
     fmt.Println("[AI extracted install steps]:")
     for i, c := range cmds {
-        fmt.Printf("%d. %s\n", i+1, c)
+        fmt.Printf("%d. %s\n", i+1, strings.TrimSpace(c))
     }
 
     // ☑️ Kullanıcı onayı
     fmt.Print("Proceed with installation? [Y/n]: ")
-    var resp string
-    fmt.Scanln(&resp)
+    reader := bufio.NewReader(os.Stdin)
+    resp, _ := reader.ReadString('\n')
+    resp = strings.TrimSpace(resp)
     if strings.ToLower(resp) != "y" && resp != "" {
         return fmt.Errorf("installation aborted by user")
     }
 
+    // 🧱 Komutları sırayla çalıştır
     for _, c := range cmds {
         c = strings.TrimSpace(c)
         if c == "" {
@@ -181,45 +190,66 @@ List each command on its own line. No explanations, no comments.
         }
 
         lower := strings.ToLower(c)
-        if strings.Contains(lower, "sudo ") ||
+        if strings.HasPrefix(lower, "sudo ") ||
             strings.Contains(lower, "rm ") ||
-            strings.Contains(lower, ":(){ :|:& };:") || // fork bomb koruması
-            strings.Contains(lower, "mkfs") || // disk format
-            strings.Contains(lower, "dd if=") { // disk overwrite
+            strings.Contains(lower, ":(){ :|:& };:") ||
+            strings.Contains(lower, "mkfs") ||
+            strings.Contains(lower, "dd if=") {
             fmt.Printf("⚠️ skipped dangerous command: %s\n", c)
             continue
         }
 
-        runCmd(c)
+        parts := strings.Fields(c)
+        if len(parts) == 0 {
+            continue
+        }
+
+        execCmd := exec.Command(parts[0], parts[1:]...)
+        execCmd.Stdout = os.Stdout
+        execCmd.Stderr = os.Stderr
+        fmt.Printf("→ executing: %s\n", c)
+
+        if err := execCmd.Run(); err != nil {
+            return fmt.Errorf("command failed (%s): %w", c, err)
+        }
     }
 
     return nil
 }
 
-// Regex fallback
+// Basit fallback regex parser
 func parseReadmeRegex(content string) error {
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "git clone") ||
-			strings.Contains(line, "./install") ||
-			strings.Contains(line, "make install") {
-			fmt.Println("→ executing:", line)
-			runCmd(line)
-		}
-	}
-	return nil
+    lines := strings.Split(content, "\n")
+    for _, line := range lines {
+        trimmed := strings.TrimSpace(line)
+        if strings.HasPrefix(trimmed, "git clone") ||
+            strings.Contains(trimmed, "github.com/hyprcommunity/hypr-release/install"") ||
+            strings.Contains(trimmed, "make install") {
+            fmt.Println("→ executing (regex):", trimmed)
+            parts := strings.Fields(trimmed)
+            if len(parts) == 0 {
+                continue
+            }
+            cmd := exec.Command(parts[0], parts[1:]...)
+            cmd.Stdout = os.Stdout
+            cmd.Stderr = os.Stderr
+            if err := cmd.Run(); err != nil {
+                return fmt.Errorf("fallback command failed (%s): %w", trimmed, err)
+            }
+        }
+    }
+    return nil
 }
 
 // ------------------------------------------------------------
 // AI tabanlı güvenli dosya seçimi
 func aiSafeFileInstall(repoPath string) error {
-    // 🔍 LLM model dizini tanımlanıyor
+    // 🔍 Model dizini taraması (sadece bilgilendirme amaçlı)
     files, err := os.ReadDir(SystemModelDir)
     if err != nil {
         return fmt.Errorf("failed to read model directory: %v", err)
     }
 
-    // 🧩 İlk .gguf dosyasını bul
     var modelPath string
     for _, f := range files {
         if strings.HasSuffix(f.Name(), ".gguf") {
@@ -227,14 +257,11 @@ func aiSafeFileInstall(repoPath string) error {
             break
         }
     }
-
     if modelPath == "" {
-        return fmt.Errorf("no .gguf model found in %s", SystemModelDir)
+        fmt.Println("⚠️ no .gguf model found, continuing with Wingman LLM backend.")
+    } else {
+        fmt.Printf("[hyprrelease] using AI model (gguf detected): %s\n", filepath.Base(modelPath))
     }
-
-    fmt.Printf("[hyprrelease] AI-based safe file analysis using model: %s\n", filepath.Base(modelPath))
-
-    model := llm.LoadModel(modelPath)
 
     // 🔧 Dosya ağacını çıkar
     var structure []string
@@ -248,20 +275,26 @@ func aiSafeFileInstall(repoPath string) error {
         return nil
     })
 
-    // 🧠 Prompt (optimize edilmiş)
+    // 🧠 LLM prompt
     prompt := `
 You are a configuration installer AI.
 From this file tree, select ONLY configuration and script files safe to copy into ~/.config/hypr/.
 Prefer .conf, .ini, .json, .lua, .sh, .desktop files.
-Ignore LICENSE, README, cache, images, fonts, binaries.
-Return one relative path per line, with no explanations.
+Ignore LICENSE, README, cache, images, fonts, binaries, build artifacts.
+Return one relative path per line, no comments, no explanations.
 ---
 ` + strings.Join(structure, "\n")
 
-    raw := model.Predict(prompt)
-    filesList := strings.Split(strings.TrimSpace(raw), "\n")
+    // 🚀 Wingman CLI çağrısı
+    cmd := exec.Command("wingman", "ask", prompt)
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return fmt.Errorf("wingman failed: %v\nOutput: %s", err, string(output))
+    }
 
-    if len(filesList) == 0 {
+    raw := strings.TrimSpace(string(output))
+    filesList := strings.Split(raw, "\n")
+    if len(filesList) == 0 || raw == "" {
         return fmt.Errorf("AI returned no file list")
     }
 
@@ -270,41 +303,66 @@ Return one relative path per line, with no explanations.
         fmt.Println(" →", f)
     }
 
+    // ☑️ Kullanıcı onayı
     fmt.Print("Proceed with AI-selected file copy? [Y/n]: ")
     var resp string
     fmt.Scanln(&resp)
-    if strings.ToLower(resp) != "y" && resp != "" {
-        return fmt.Errorf("user aborted")
+    if strings.ToLower(strings.TrimSpace(resp)) != "y" && resp != "" {
+        return fmt.Errorf("user aborted installation")
     }
 
-    home, _ := os.UserHomeDir()
+    // 🎯 Hedef dizin
+    home, err := os.UserHomeDir()
+    if err != nil {
+        return fmt.Errorf("cannot resolve home directory: %v", err)
+    }
     target := filepath.Join(home, ".config", "hypr")
 
+    // 📁 Dosyaları güvenli şekilde kopyala
     for _, rel := range filesList {
+        rel = strings.TrimSpace(rel)
+        if rel == "" {
+            continue
+        }
+
         src := filepath.Join(repoPath, rel)
         dest := filepath.Join(target, rel)
-        if _, err := os.Stat(src); err != nil {
+
+        info, err := os.Stat(src)
+        if err != nil || info.IsDir() {
+            fmt.Printf("⚠️ skipping invalid: %s\n", rel)
             continue
         }
 
-        os.MkdirAll(filepath.Dir(dest), 0755)
+        if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+            fmt.Printf("⚠️ failed to create directory for %s: %v\n", rel, err)
+            continue
+        }
 
-        s, err := os.Open(src)
+        in, err := os.Open(src)
         if err != nil {
+            fmt.Printf("⚠️ failed to open source %s: %v\n", rel, err)
             continue
         }
-        defer s.Close()
 
-        d, err := os.Create(dest)
+        out, err := os.Create(dest)
         if err != nil {
+            in.Close()
+            fmt.Printf("⚠️ failed to create destination %s: %v\n", rel, err)
             continue
         }
-        io.Copy(d, s)
-        d.Close()
 
-        fmt.Println("→ copied:", rel)
+        if _, err := io.Copy(out, in); err != nil {
+            fmt.Printf("⚠️ copy error for %s: %v\n", rel, err)
+        } else {
+            fmt.Println("→ copied:", rel)
+        }
+
+        in.Close()
+        out.Close()
     }
 
+    fmt.Println("✅ AI-selected configuration files successfully copied.")
     return nil
 }
 

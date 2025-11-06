@@ -1,12 +1,13 @@
-package backend
+package updateing
 
 import (
 	"fmt"
 	"time"
 
-	"hyprrelease/api/releases/check/hyprland"
-	"hyprrelease/api/releases/updateing"
-	"hyprrelease/summaryofversion"
+       "github.com/hyprcommunity/hypr-release/api/releases/check/hyprland"
+       "github.com/hyprcommunity/hypr-release/api/releases/updateing"
+       "github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
+
 )
 
 // UpdateDotfileAndSystem : dotfile + hyprland sistemini karşılaştırır ve gerekirse günceller

@@ -1,4 +1,4 @@
-package hyprland
+package check
 
 import (
 	"bytes"

@@ -1,4 +1,4 @@
-package backend
+package updateing
 
 import (
 	"bufio"
@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -22,6 +23,43 @@ type LLMModel struct {
 
 // Default model directory
 var SystemModelDir = "/usr/share/hypr-release/ai/LLM/"
+
+// ✅ CheckOrInstallWingman : ensures Wingman is installed or attempts auto-install
+func CheckOrInstallWingman() error {
+	_, err := exec.LookPath("wingman")
+	if err == nil {
+		fmt.Println("✅ Wingman detected on system.")
+		return nil
+	}
+
+	fmt.Println("⚠️  Wingman CLI not found on system.")
+	fmt.Println("↪  Attempting to install automatically...")
+
+	// Kullanıcıya bilgi notu
+	fmt.Println(`
+You can manually install Wingman using one of the following:
+  • Arch Linux (AUR):    yay -S wingman-bin
+  • Go source install:   go install github.com/adrianliechti/wingman/cmd/wingman@latest
+  • GitHub releases:     https://github.com/adrianliechti/wingman/releases
+`)
+
+	// Otomatik Go ile kurulum denemesi
+	cmd := exec.Command("go", "install", "github.com/adrianliechti/wingman/cmd/wingman@latest")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("⚠️ automatic Wingman install failed: %v", err)
+	}
+
+	// Yeniden kontrol
+	_, err = exec.LookPath("wingman")
+	if err != nil {
+		return fmt.Errorf("⚠️ Wingman installation unsuccessful; please install manually")
+	}
+
+	fmt.Println("✅ Wingman successfully installed and ready for use.")
+	return nil
+}
 
 // calcLocalChecksum : calculates the SHA256 checksum of a file
 func calcLocalChecksum(path string) (string, error) {
@@ -139,6 +177,13 @@ func SelectAndInstallModel() {
 		fmt.Println("⚠️  Model download failed:", err)
 	} else {
 		fmt.Println("✅ Model successfully installed.")
+	}
+
+	// ✅ Wingman kontrolü (model indirildikten sonra)
+	if err := CheckOrInstallWingman(); err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println("🧠 Wingman environment ready for AI-based automation.")
 	}
 }
 

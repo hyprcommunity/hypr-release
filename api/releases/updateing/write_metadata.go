@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"hypr-release/internal/dotfiles"
+	"github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
 )
 
 // WriteMetaFile : Registry bilgileriyle /etc/hyprland-release dosyasını oluşturur veya günceller.

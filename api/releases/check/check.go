@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"hypr-release/internal/dotfiles"
+	"github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
 )
 
 // Release bilgisi
