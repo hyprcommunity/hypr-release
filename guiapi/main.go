@@ -1,10 +1,10 @@
-package  guiapi
+package main
 
 import (
     "fyne.io/fyne/v2/app"
     "fyne.io/fyne/v2/container"
     "github.com/hyprcommunity/hypr-release/guiapi/bridge"
-    "github.com/hyprcommunity/hypr-release/guiapi/ui-schema"
+    "github.com/hyprcommunity/hypr-release/guiapi/ui"
 )
 
 func main() {

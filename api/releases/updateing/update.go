@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"time"
 
-       "github.com/hyprcommunity/hypr-release/api/releases/check/hyprland"
-       "github.com/hyprcommunity/hypr-release/api/releases/updateing"
+       "github.com/hyprcommunity/hypr-release/api/releases/check"
        "github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
 
 )
