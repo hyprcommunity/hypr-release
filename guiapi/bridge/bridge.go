@@ -1,44 +1,49 @@
 package bridge
 
 import (
-    "encoding/json"
-    "fmt"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "strings"
-    "time"
-    "github.com/hyprcommunity/hypr-release/api/releases/check"
-    "github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
-    "github.com/hyprcommunity/hypr-release/api/releases/updateing"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/hyprcommunity/hypr-release/api/releases/check"
+	"github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
+	"github.com/hyprcommunity/hypr-release/api/releases/updateing"
 )
 
 // Bridge GUI ile CLI backend arasındaki soyut katmandır.
 // GUI yalnızca bu interface ile konuşur.
 type Bridge struct {
-    // Config alanları istenirse buraya eklenebilir
-    ReleasePath string
+	ReleasePath string
 }
 
 // NewBridge: Varsayılan bir Bridge oluşturur.
 func NewBridge() *Bridge {
-    return &Bridge{
-        ReleasePath: "/etc/hyprland-release",
-    }
+	return &Bridge{
+		ReleasePath: "/etc/hyprland-release",
+	}
 }
 
 //
 // ──────────────────────────── 1. SYSTEM CHECK ────────────────────────────
 //
 
-// SystemInfo: sistem sürümü, kernel, distro, hyprland verilerini döner.
-func (b *Bridge) SystemInfo() (map[string]string, error) {
-    data, err := check.GetSystemMeta() // Örnek fonksiyon; check paketinde bu tür bir çağrı tanımlanmalı
-    if err != nil {
-        return nil, fmt.Errorf("system check failed: %v", err)
-    }
-    return data, nil
+// SystemInfo: sistem bileşenleri ve log çıktısını döndürür.
+func (b *Bridge) SystemInfo() (string, error) {
+	components, logText, err := check.CheckHyprSystem()
+	if err != nil {
+		return "", fmt.Errorf("system check failed: %v", err)
+	}
+
+	result := map[string]any{
+		"components": components,
+		"log":        logText,
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return string(data), nil
 }
 
 //
@@ -47,24 +52,24 @@ func (b *Bridge) SystemInfo() (map[string]string, error) {
 
 // DotfileEntry: GUI'de gösterilecek sade model
 type DotfileEntry struct {
-    Name    string `json:"name"`
-    Author  string `json:"author"`
-    RepoURL string `json:"repo"`
-    Branch  string `json:"branch"`
+	Name    string `json:"name"`
+	Author  string `json:"author"`
+	RepoURL string `json:"repo"`
+	Branch  string `json:"branch"`
 }
 
 // GetDotfiles: Registry listesini döndürür.
 func (b *Bridge) GetDotfiles() ([]DotfileEntry, error) {
-    var entries []DotfileEntry
-    for _, d := range dotfiles.Registry {
-        entries = append(entries, DotfileEntry{
-            Name:    d.Name,
-            Author:  d.Author,
-            RepoURL: d.Repo,
-            Branch:  d.Branch,
-        })
-    }
-    return entries, nil
+	var entries []DotfileEntry
+	for _, d := range summaryofversion.Registry {
+		entries = append(entries, DotfileEntry{
+			Name:    d.Name,
+			Author:  d.Author,
+			RepoURL: d.Repo,
+			Branch:  d.Branch,
+		})
+	}
+	return entries, nil
 }
 
 //
@@ -73,63 +78,76 @@ func (b *Bridge) GetDotfiles() ([]DotfileEntry, error) {
 
 // InstallDotfile: seçili dotfile’ı kurar.
 func (b *Bridge) InstallDotfile(name string) error {
-    fmt.Printf("[install] starting installation for %s...\n", name)
-    if err := backend.Install(name); err != nil {
-        return fmt.Errorf("install failed: %v", err)
-    }
-    return nil
+	fmt.Printf("[install] installing %s...\n", name)
+	if err := updateing.InstallFromRegistry(name); err != nil {
+		return fmt.Errorf("install failed: %v", err)
+	}
+	return nil
 }
 
 // UpdateDotfile: mevcut dotfile’ı günceller.
 func (b *Bridge) UpdateDotfile(name string) error {
-    fmt.Printf("[update] checking updates for %s...\n", name)
-    if err := backend.Update(name); err != nil {
-        return fmt.Errorf("update failed: %v", err)
-    }
-    return nil
+	fmt.Printf("[update] updating %s...\n", name)
+	if err := updateing.UpdateDotfileAndSystem(name); err != nil {
+		return fmt.Errorf("update failed: %v", err)
+	}
+	return nil
 }
 
 //
 // ──────────────────────────── 4. RELEASE / VERSION ────────────────────────────
 //
 
-// CheckRelease: Git üzerinden Hyprland versiyonunu denetler.
-func (b *Bridge) CheckRelease() (string, error) {
-    version, commitsBehind, err := check.CheckVersion()
-    if err != nil {
-        return "", err
-    }
-    return fmt.Sprintf("%s (behind %d commits)", version, commitsBehind), nil
+// CheckRelease: GitHub ve git tag’leri üzerinden versiyon bilgisi alır.
+func (b *Bridge) CheckRelease(dotfileName, repoPath string) (string, error) {
+	result, logText, err := check.CheckAll(dotfileName, repoPath)
+	if err != nil {
+		return "", fmt.Errorf("version check failed: %v", err)
+	}
+
+	data := map[string]any{
+		"version_info": result,
+		"log":          logText,
+	}
+	out, _ := json.MarshalIndent(data, "", "  ")
+	return string(out), nil
 }
 
-// ExportReleaseJSON: /etc/hyprland-release ve system meta’yı birleştirir, JSON döner.
+// ExportReleaseJSON: release metadata dosyalarını birleştirip JSON döndürür.
 func (b *Bridge) ExportReleaseJSON() (string, error) {
-    release := filepath.Join("/etc", "hyprland-release")
-    system := filepath.Join("/etc", "hyprland-system-release")
+	release := filepath.Join("/etc", "hyprland-release")
+	system := filepath.Join("/etc", "hyprland-system-release")
 
-    data := make(map[string]any)
-    files := []string{release, system}
-    for _, f := range files {
-        if _, err := os.Stat(f); err != nil {
-            continue
-        }
-        content, err := os.ReadFile(f)
-        if err != nil {
-            continue
-        }
-        var part map[string]any
-        if err := json.Unmarshal(content, &part); err == nil {
-            for k, v := range part {
-                data[k] = v
-            }
-        }
-    }
+	data := make(map[string]any)
+	files := []string{release, system}
+	for _, f := range files {
+		if _, err := os.Stat(f); err != nil {
+			continue
+		}
+		content, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
 
-    out, err := json.MarshalIndent(data, "", "  ")
-    if err != nil {
-        return "", err
-    }
-    return string(out), nil
+		// /etc/hyprland-release text dosyası olduğundan JSON parse denemesi korumalı olmalı
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "=") {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0])
+					val := strings.Trim(strings.TrimSpace(parts[1]), `"`)
+					data[key] = val
+				}
+			}
+		}
+	}
+
+	out, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 //
@@ -138,16 +156,16 @@ func (b *Bridge) ExportReleaseJSON() (string, error) {
 
 // RunCommand: CLI komutlarını güvenli şekilde çalıştırır (log amaçlı)
 func (b *Bridge) RunCommand(cmd string, args ...string) (string, error) {
-    command := exec.Command(cmd, args...)
-    out, err := command.CombinedOutput()
-    if err != nil {
-        return string(out), fmt.Errorf("command failed: %v", err)
-    }
-    return strings.TrimSpace(string(out)), nil
+	command := exec.Command(cmd, args...)
+	out, err := command.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("command failed: %v", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // SaveLog: GUI loglarını /tmp içine kaydeder
 func (b *Bridge) SaveLog(content string) error {
-    path := filepath.Join(os.TempDir(), fmt.Sprintf("hyprrelease_%d.log", time.Now().Unix()))
-    return os.WriteFile(path, []byte(content), 0644)
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("hyprrelease_%d.log", time.Now().Unix()))
+	return os.WriteFile(path, []byte(content), 0644)
 }

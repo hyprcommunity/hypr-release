@@ -4,12 +4,11 @@ import (
 	"fmt"
 	"time"
 
-       "github.com/hyprcommunity/hypr-release/api/releases/check"
-       "github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
-
+	"github.com/hyprcommunity/hypr-release/api/releases/check"
+	"github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
 )
 
-// UpdateDotfileAndSystem : dotfile + hyprland sistemini karşılaştırır ve gerekirse günceller
+// UpdateDotfileAndSystem : dotfile + sistem bileşenlerini karşılaştırır ve gerekirse günceller
 func UpdateDotfileAndSystem(dotfileName string) error {
 	fmt.Printf("[hyprrelease-update] checking for updates: %s\n", dotfileName)
 
@@ -25,11 +24,11 @@ func UpdateDotfileAndSystem(dotfileName string) error {
 		return fmt.Errorf("dotfile not found: %s", dotfileName)
 	}
 
-	// Hyprland sistemini kontrol et
+	// Sistem bileşenlerini kontrol et
 	fmt.Println("[hyprrelease-update] scanning system components...")
-	components, logText, err := hyprland.CheckHyprSystem()
+	components, logText, err := check.CheckHyprSystem()
 	if err != nil {
-		fmt.Println("⚠️ failed to check Hypr system:", err)
+		fmt.Println("⚠️ failed to check system:", err)
 	} else {
 		fmt.Println(logText)
 	}
@@ -50,14 +49,14 @@ func UpdateDotfileAndSystem(dotfileName string) error {
 		fmt.Println("[hyprrelease-update] all system components up to date.")
 	}
 
-	// Dotfile metadata’yı oluştur (güncelleme sırasında sürüm bilgisi yazar)
+	// Metadata oluşturma
 	versionMain := "unknown"
 	versionBuild := time.Now().Format("20060102")
 	branch := selected.Branch
 	releaseChannel := "stable"
 	commitsBehind := "0"
 
-	err = updateing.WriteMetaFile(
+	err = WriteMetaFile(
 		selected.Name,
 		versionMain,
 		versionBuild,
@@ -66,12 +65,12 @@ func UpdateDotfileAndSystem(dotfileName string) error {
 		commitsBehind,
 	)
 	if err != nil {
-		fmt.Println("⚠️ failed to update hyprland-release metadata:", err)
+		fmt.Println("⚠️ failed to update metadata:", err)
 	} else {
 		fmt.Println("[hyprrelease-update] /etc/hyprland-release updated")
 	}
 
-	// Güncelleme işlemi (kullanıcı onayı alınabilir)
+	// Kullanıcıdan onay al
 	fmt.Print("Do you want to reinstall or update this dotfile? [y/N]: ")
 	var resp string
 	fmt.Scanln(&resp)
@@ -80,6 +79,7 @@ func UpdateDotfileAndSystem(dotfileName string) error {
 		return nil
 	}
 
+	// Yeniden kurulum
 	fmt.Println("[hyprrelease-update] reinstalling dotfile from registry...")
 	if err := InstallFromRegistry(dotfileName); err != nil {
 		return fmt.Errorf("installation failed: %v", err)

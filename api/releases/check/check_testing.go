@@ -20,7 +20,7 @@ func CheckTestingStatus(dotfileName, repoPath string) (TestingStatus, string, er
 	var log strings.Builder
 	status := TestingStatus{}
 
-	d := dotfiles.GetDotfileByName(dotfileName)
+	d := summaryofversion.GetDotfileByName(dotfileName)
 	if d == nil {
 		return status, "", fmt.Errorf("dotfile not found: %s", dotfileName)
 	}

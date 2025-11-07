@@ -3,19 +3,19 @@ package updateing
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/hyprcommunity/hypr-release/api/releases/summaryofversion"
 )
 
-// WriteMetaFile : Registry bilgileriyle /etc/hyprland-release dosyasını oluşturur veya günceller.
+// WriteMetaFile : Registry bilgileriyle hyprland-release metadata dosyasını oluşturur veya günceller.
 func WriteMetaFile(dotfileName string, versionMain, versionBuild, branch, releaseChannel, commitsBehind string) error {
-	d := dotfiles.GetDotfileByName(dotfileName)
+	d := summaryofversion.GetDotfileByName(dotfileName)
 	if d == nil {
 		return fmt.Errorf("dotfile not found: %s", dotfileName)
 	}
 
-	file := "/etc/hyprland-release"
 	content := fmt.Sprintf(`# Hyprland Release Metadata
 HYPRLAND_DOTFILES_NAME="%s"
 HYPRLAND_DOTFILES_AUTHOR="%s"
@@ -40,9 +40,26 @@ HYPRLAND_INSTALL_DATE="%s"
 		time.Now().Format("2006-01-02 15:04:05"),
 	)
 
-	err := os.WriteFile(file, []byte(content), 0644)
+	// Kullanıcı dizinine yazılacak varsayılan yol
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to write /etc/hyprland-release: %v", err)
+		home = "/tmp"
 	}
-	return nil
+	userPath := filepath.Join(home, ".config", "hypr-release", "hyprland-release")
+	os.MkdirAll(filepath.Dir(userPath), 0755)
+
+	// Önce kullanıcı dizinine yazmayı dene
+	if err := os.WriteFile(userPath, []byte(content), 0644); err == nil {
+		fmt.Printf("[hyprrelease] metadata written to %s\n", userPath)
+		return nil
+	}
+
+	// Eğer başarısız olursa /etc altına yazmayı dene
+	systemPath := "/etc/hyprland-release"
+	if err := os.WriteFile(systemPath, []byte(content), 0644); err == nil {
+		fmt.Printf("[hyprrelease] metadata written to %s\n", systemPath)
+		return nil
+	}
+
+	return fmt.Errorf("failed to write metadata to either %s or %s", userPath, systemPath)
 }

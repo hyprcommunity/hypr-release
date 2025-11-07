@@ -3,6 +3,7 @@ package updateing
 import (
 	"fmt"
 	"io"
+        "bufio"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -11,7 +12,7 @@ import (
         "github.com/hyprcommunity/hypr-release/api/releases/summaryofversion" 
 )
 
-const SystemModelDir = "/usr/share/hypr-release/ai/LLM/"
+// const SystemModelDir = "/usr/share/hypr-release/ai/LLM/"
 
 // InstallFromRegistry : summaryofversion/registry.go'dan dotfile indirip kurar
 func InstallFromRegistry(name string) error {
@@ -223,7 +224,7 @@ func parseReadmeRegex(content string) error {
     for _, line := range lines {
         trimmed := strings.TrimSpace(line)
         if strings.HasPrefix(trimmed, "git clone") ||
-            strings.Contains(trimmed, "github.com/hyprcommunity/hypr-release/install"") ||
+            strings.Contains(trimmed, "github.com/hyprcommunity/hypr-release/install") ||
             strings.Contains(trimmed, "make install") {
             fmt.Println("→ executing (regex):", trimmed)
             parts := strings.Fields(trimmed)

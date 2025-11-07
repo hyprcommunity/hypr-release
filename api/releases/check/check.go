@@ -23,7 +23,7 @@ func CheckAll(dotfileName, repoPath string) (map[string]string, string, error) {
 	result := make(map[string]string)
 	var output strings.Builder
 
-	d := dotfiles.GetDotfileByName(dotfileName)
+	d := summaryofversion.GetDotfileByName(dotfileName)
 	if d == nil {
 		return nil, "", fmt.Errorf("dotfile not found: %s", dotfileName)
 	}

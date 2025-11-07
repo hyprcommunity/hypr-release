@@ -77,6 +77,7 @@ func CheckHyprSystem() ([]HyprComponent, string, error) {
 	if err := WriteHyprSystemMeta(results); err != nil {
 		log.WriteString(fmt.Sprintf("⚠️ system meta write failed: %v\n", err))
 	}
+
 	appendReleaseInfo()
 	return results, log.String(), nil
 }
@@ -130,4 +131,14 @@ func getPackageManagerVersion(pkg string) (string, string) {
 		}
 	}
 	return "unknown", "none"
+}
+
+// appendReleaseInfo provides a small log summary.
+func appendReleaseInfo() {
+	var buf strings.Builder
+	buf.WriteString("\n📦 Hyprland Component Summary:\n")
+	for _, c := range []string{"hyprland", "hyprctl", "hyprpaper", "hypridle", "hyprlock"} {
+		buf.WriteString(fmt.Sprintf("- %s checked.\n", c))
+	}
+	fmt.Println(buf.String())
 }
